@@ -799,6 +799,9 @@ Type Declaration
 				CLASS_MEMBER_METHOD(GetDisplayString, { L"files" })
 				CLASS_MEMBER_METHOD(ParseDisplayString, { L"displayString" })
 				CLASS_MEMBER_METHOD(TryConfirm, { L"owner" _ L"selection"})
+				CLASS_MEMBER_METHOD(IsConfirmed, NO_PARAMETER)
+				CLASS_MEMBER_PROPERTY_READONLY_FAST(ConfirmedSelection)
+				CLASS_MEMBER_METHOD(ResetConfirmation, NO_PARAMETER)
 				CLASS_MEMBER_METHOD(InitLocalizedText,
 					{	L"textLoadingFolders"
 					_	L"textLoadingFiles"

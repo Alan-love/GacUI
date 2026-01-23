@@ -79,7 +79,7 @@ you can merge the last two tasks together, complete the unit test first and then
 # TASKS
 
 - [x] TASK No.1: Add FileItemMock + FileSystemMock (IFileSystemImpl)
-- [ ] TASK No.2: Make FileDialogViewModel testable (options + message box + factory) and add empty test file
+- [x] TASK No.2: Make FileDialogViewModel testable (options + message box + factory) and add empty test file
 - [ ] TASK No.3: TEST_CATEGORY for folder navigation + file listing
 - [ ] TASK No.4: TEST_CATEGORY for filter visibility + default extension behavior
 - [ ] TASK No.5: TEST_CATEGORY for ParseDisplayString + multi-selection normalization

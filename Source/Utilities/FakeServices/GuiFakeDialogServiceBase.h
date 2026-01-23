@@ -349,6 +349,36 @@ View Models (FileDialog)
 			virtual bool					FilterFile(Ptr<IFileDialogFile> file) = 0;
 		};
 
+		class IFileSystemViewModelMessageBox : public virtual IDescriptable
+		{
+		public:
+			using ButtonsInput = INativeDialogService::MessageBoxButtonsInput;
+			using ButtonsOutput = INativeDialogService::MessageBoxButtonsOutput;
+			using DefaultButton = INativeDialogService::MessageBoxDefaultButton;
+			using Icon = INativeDialogService::MessageBoxIcons;
+
+			virtual ButtonsOutput	ShowMessageBox(
+									INativeWindow* window,
+									const WString& text,
+									const WString& title,
+									ButtonsInput buttons,
+									DefaultButton defaultButton,
+									Icon icon
+								) = 0;
+		};
+
+		struct FileSystemViewModelOptions
+		{
+			WString							title;
+			bool							enabledMultipleSelection = false;
+			bool							fileMustExist = false;
+			bool							folderMustExist = false;
+			bool							promptCreateFile = false;
+			bool							promptOverriteFile = false;
+			WString							defaultExtension;
+			Ptr<IFileSystemViewModelMessageBox>	messageBox;
+		};
+
 		/// <summary>
 		/// The view model for file dialog. It is implemented by <see cref="FakeDialogServiceBase"/>.
 		/// </summary>
@@ -359,6 +389,7 @@ View Models (FileDialog)
 			using Folders = IFileDialogFolder::Folders;
 			using Files = IFileDialogFile::Files;
 			using Selection = collections::LazyList<WString>;
+			using ConfirmedSelection = collections::List<WString>;
 
 			/// <summary>
 			/// Raised when the <see cref="GetSelectedFilter"/> is changed.
@@ -456,6 +487,10 @@ View Models (FileDialog)
 			/// <param name="selectedPaths">All selected items in string format. Each of them could be either full path, relative path or file name.</param>
 			/// <returns>Returns true if the selection is valid.</returns>
 			virtual bool					TryConfirm(controls::GuiWindow* owner, Selection selection) = 0;
+
+			virtual bool					IsConfirmed() = 0;
+			virtual const ConfirmedSelection&	GetConfirmedSelection() = 0;
+			virtual void					ResetConfirmation() = 0;
 
 			/// <summary>
 			/// Initialize the view model with localized texts.

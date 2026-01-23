@@ -9,6 +9,25 @@ namespace vl
 		using namespace regex;
 		using namespace controls;
 
+		namespace
+		{
+			class DefaultFileSystemViewModelMessageBox : public Object, public virtual IFileSystemViewModelMessageBox
+			{
+			public:
+				ButtonsOutput ShowMessageBox(
+					INativeWindow* window,
+					const WString& text,
+					const WString& title,
+					ButtonsInput buttons,
+					DefaultButton defaultButton,
+					Icon icon
+				) override
+				{
+					return GetCurrentController()->DialogService()->ShowMessageBox(window, text, title, buttons, defaultButton, icon);
+				}
+			};
+		}
+
 /***********************************************************************
 View Model (IFileDialogFilter)
 ***********************************************************************/
@@ -213,7 +232,7 @@ View Model (IFileDialogViewModel)
 
 		class FileDialogViewModel : public Object, public virtual IFileDialogViewModel
 		{
-			using ConfirmedSelection = collections::List<WString>;
+			using ConfirmedSelection = IFileDialogViewModel::ConfirmedSelection;
 		protected:
 			WString						textLoadingFolders;
 			WString						textLoadingFiles;
@@ -235,14 +254,7 @@ View Model (IFileDialogViewModel)
 			bool						selectToSave = false;
 			bool						confirmed = false;
 			ConfirmedSelection			confirmedSelection;
-
-			WString						title;
-			bool						enabledMultipleSelection = false;
-			bool						fileMustExist = false;
-			bool						folderMustExist = false;
-			bool						promptCreateFile = false;
-			bool						promptOverriteFile = false;
-			WString						defaultExtension;
+			FileSystemViewModelOptions	options;
 
 			Filters						filters;
 			Ptr<FileDialogFilter>		selectedFilter;
@@ -253,17 +265,33 @@ View Model (IFileDialogViewModel)
 
 			WString GetTitle() override
 			{
-				return title;
+				return options.title;
 			}
 
 			bool GetEnabledMultipleSelection() override
 			{
-				return enabledMultipleSelection;
+				return options.enabledMultipleSelection;
 			}
 
 			WString GetDefaultExtension() override
 			{
-				return defaultExtension;
+				return options.defaultExtension;
+			}
+
+			bool IsConfirmed() override
+			{
+				return confirmed;
+			}
+
+			const ConfirmedSelection& GetConfirmedSelection() override
+			{
+				return confirmedSelection;
+			}
+
+			void ResetConfirmation() override
+			{
+				confirmed = false;
+				confirmedSelection.Clear();
 			}
 
 			const Filters& GetFilters() override
@@ -469,6 +497,8 @@ View Model (IFileDialogViewModel)
 
 			bool TryConfirm(controls::GuiWindow* owner, Selection selectedPaths) override
 			{
+				CHECK_ERROR(options.messageBox, L"vl::presentation::FileDialogViewModel::TryConfirm()#options.messageBox is not initialized.");
+
 				auto wd = selectedFolder->folder.GetFilePath();
 				List<filesystem::FilePath> paths;
 				CopyFrom(
@@ -478,7 +508,7 @@ View Model (IFileDialogViewModel)
 
 				if (paths.Count() == 0)
 				{
-					GetCurrentController()->DialogService()->ShowMessageBox(
+					options.messageBox->ShowMessageBox(
 						owner->GetNativeWindow(),
 						dialogErrorEmptySelection,
 						owner->GetText(),
@@ -499,9 +529,9 @@ View Model (IFileDialogViewModel)
 				}
 				else
 				{
-					if (!enabledMultipleSelection)
+					if (!options.enabledMultipleSelection)
 					{
-						GetCurrentController()->DialogService()->ShowMessageBox(
+						options.messageBox->ShowMessageBox(
 							owner->GetNativeWindow(),
 							dialogErrorMultipleSelectionNotEnabled,
 							owner->GetText(),
@@ -542,7 +572,7 @@ View Model (IFileDialogViewModel)
 							writer.WriteString(wd.GetRelativePathFor(paths[index]));
 						}
 					});
-					GetCurrentController()->DialogService()->ShowMessageBox(
+					options.messageBox->ShowMessageBox(
 						owner->GetNativeWindow(),
 						message,
 						owner->GetText(),
@@ -555,7 +585,7 @@ View Model (IFileDialogViewModel)
 
 				if (unexistings.Count() > 0)
 				{
-					if (fileMustExist)
+					if (options.fileMustExist)
 					{
 						auto message = stream::GenerateToStream([&](stream::TextWriter& writer)
 						{
@@ -567,7 +597,7 @@ View Model (IFileDialogViewModel)
 								writer.WriteString(wd.GetRelativePathFor(paths[index]));
 							}
 						});
-						GetCurrentController()->DialogService()->ShowMessageBox(
+						options.messageBox->ShowMessageBox(
 							owner->GetNativeWindow(),
 							message,
 							owner->GetText(),
@@ -578,7 +608,7 @@ View Model (IFileDialogViewModel)
 						return false;
 					}
 
-					if (folderMustExist)
+					if (options.folderMustExist)
 					{
 						SortedList<filesystem::FilePath> folderOfUnexistings;
 						for (vint index : unexistings)
@@ -611,7 +641,7 @@ View Model (IFileDialogViewModel)
 									writer.WriteString(wd.GetRelativePathFor(path));
 								}
 							});
-							GetCurrentController()->DialogService()->ShowMessageBox(
+							options.messageBox->ShowMessageBox(
 								owner->GetNativeWindow(),
 								message,
 								owner->GetText(),
@@ -625,12 +655,12 @@ View Model (IFileDialogViewModel)
 
 					WString questionMessage;
 					List<vint>* questionFiles = nullptr;
-					if (selectToSave && promptOverriteFile)
+					if (selectToSave && options.promptOverriteFile)
 					{
 						questionMessage = dialogAskOverrideFile;
 						questionFiles = &files;
 					}
-					if (!selectToSave && promptCreateFile)
+					if (!selectToSave && options.promptCreateFile)
 					{
 						questionMessage = dialogAskCreateFile;
 						questionFiles = &unexistings;
@@ -649,7 +679,7 @@ View Model (IFileDialogViewModel)
 							}
 						});
 
-						auto result = GetCurrentController()->DialogService()->ShowMessageBox(
+						auto result = options.messageBox->ShowMessageBox(
 							owner->GetNativeWindow(),
 							message,
 							owner->GetText(),
@@ -678,9 +708,9 @@ View Model (IFileDialogViewModel)
 					extensionFromFilter = extension;
 				}
 
-				if (!extensionFromFilter && defaultExtension != WString::Empty)
+				if (!extensionFromFilter && options.defaultExtension != WString::Empty)
 				{
-					extension = defaultExtension;
+					extension = options.defaultExtension;
 				}
 
 				if (extension)
@@ -753,6 +783,99 @@ View Model (IFileDialogViewModel)
 			}
 		};
 
+		namespace
+		{
+			void ParseFileDialogFilters(FileDialogViewModel& vm, vint& selectionFilterIndex, const WString& filter)
+			{
+				Regex regexFilterExt(L"/*.[^*?]+");
+				Regex regexWildcard(L"[*?;]");
+				vint filterStart = 0;
+				while (true)
+				{
+					vint first = -1;
+					vint second = -1;
+					vint count = filter.Length();
+
+					for (vint i = filterStart; i < count; i++)
+					{
+						if (filter[i] == L'|')
+						{
+							first = i;
+							break;
+						}
+					}
+					if (first == -1) break;
+
+					for (vint i = first + 1; i < count; i++)
+					{
+						if (filter[i] == L'|')
+						{
+							second = i;
+							break;
+						}
+					}
+
+					auto filterItem = Ptr(new FileDialogFilter);
+					filterItem->name = filter.Sub(filterStart, first - filterStart);
+					filterItem->filter = filter.Sub(first + 1, (second == -1 ? count : second) - first - 1);
+
+					if (auto match = regexFilterExt.MatchHead(filterItem->filter))
+					{
+						if (match->Result().Length() == filterItem->filter.Length())
+						{
+							filterItem->defaultExtension = filterItem->filter.Right(filterItem->filter.Length() - 2);
+						}
+					}
+
+					auto regexFilter = stream::GenerateToStream([&](stream::TextWriter& writer)
+					{
+						writer.WriteString(L"^(");
+						List<Ptr<RegexMatch>> matches;
+						regexWildcard.Cut(filterItem->filter, false, matches);
+						for (auto match : matches)
+						{
+							if (match->Success())
+							{
+								auto wildcard = match->Result().Value()[0];
+								switch (wildcard)
+								{
+								case L'*':
+									writer.WriteString(WString::Unmanaged(L"/.*"));
+									break;
+								case L'?':
+									writer.WriteString(WString::Unmanaged(L"/."));
+									break;
+								case L';':
+									writer.WriteString(WString::Unmanaged(L"|"));
+									break;
+								}
+							}
+							else
+							{
+								writer.WriteString(u32tow(regex_internal::EscapeTextForRegex(wtou32(match->Result().Value()))));
+							}
+						}
+						writer.WriteString(L")$");
+					});
+					filterItem->regexFilter = Ptr(new Regex(regexFilter));
+
+					vm.filters.Add(filterItem);
+
+					if (second == -1) break;
+					filterStart = second + 1;
+				}
+
+				if (vm.filters.Count() > 0)
+				{
+					if (selectionFilterIndex < 0 || vm.filters.Count() <= selectionFilterIndex)
+					{
+						selectionFilterIndex = 0;
+					}
+					vm.selectedFilter = vm.filters[selectionFilterIndex].Cast<FileDialogFilter>();
+				}
+			}
+		}
+
 /***********************************************************************
 FakeDialogServiceBase
 ***********************************************************************/
@@ -771,100 +894,16 @@ FakeDialogServiceBase
 		)
 		{
 			auto vm = Ptr(new FileDialogViewModel);
-			vm->title = title;
-			vm->enabledMultipleSelection = (options & INativeDialogService::FileDialogAllowMultipleSelection) != 0;
-			vm->fileMustExist = (options & INativeDialogService::FileDialogFileMustExist) != 0;
-			vm->folderMustExist = (options & INativeDialogService::FileDialogDirectoryMustExist) != 0;
-			vm->promptCreateFile = (options & INativeDialogService::FileDialogPromptCreateFile) != 0;
-			vm->promptOverriteFile = (options & INativeDialogService::FileDialogPromptOverwriteFile) != 0;
-			vm->defaultExtension = defaultExtension;
+			vm->options.title = title;
+			vm->options.enabledMultipleSelection = (options & INativeDialogService::FileDialogAllowMultipleSelection) != 0;
+			vm->options.fileMustExist = (options & INativeDialogService::FileDialogFileMustExist) != 0;
+			vm->options.folderMustExist = (options & INativeDialogService::FileDialogDirectoryMustExist) != 0;
+			vm->options.promptCreateFile = (options & INativeDialogService::FileDialogPromptCreateFile) != 0;
+			vm->options.promptOverriteFile = (options & INativeDialogService::FileDialogPromptOverwriteFile) != 0;
+			vm->options.defaultExtension = defaultExtension;
+			vm->options.messageBox = Ptr(new DefaultFileSystemViewModelMessageBox);
 
-			Regex regexFilterExt(L"/*.[^*?]+");
-			Regex regexWildcard(L"[*?;]");
-			vint filterStart = 0;
-			while (true)
-			{
-				vint first = -1;
-				vint second = -1;
-				vint count = filter.Length();
-
-				for (vint i = filterStart; i < count; i++)
-				{
-					if (filter[i] == L'|')
-					{
-						first = i;
-						break;
-					}
-				}
-				if (first == -1) break;
-
-				for (vint i = first + 1; i < count; i++)
-				{
-					if (filter[i] == L'|')
-					{
-						second = i;
-						break;
-					}
-				}
-
-				auto filterItem = Ptr(new FileDialogFilter);
-				filterItem->name = filter.Sub(filterStart, first - filterStart);
-				filterItem->filter = filter.Sub(first + 1, (second == -1 ? count : second) - first - 1);
-
-				if (auto match = regexFilterExt.MatchHead(filterItem->filter))
-				{
-					if (match->Result().Length() == filterItem->filter.Length())
-					{
-						filterItem->defaultExtension = filterItem->filter.Right(filterItem->filter.Length() - 2);
-					}
-				}
-
-				auto regexFilter = stream::GenerateToStream([&](stream::TextWriter& writer)
-				{
-					writer.WriteString(L"^(");
-					List<Ptr<RegexMatch>> matches;
-					regexWildcard.Cut(filterItem->filter, false, matches);
-					for (auto match : matches)
-					{
-						if (match->Success())
-						{
-							auto wildcard = match->Result().Value()[0];
-							switch (wildcard)
-							{
-							case L'*':
-								writer.WriteString(WString::Unmanaged(L"/.*"));
-								break;
-							case L'?':
-								writer.WriteString(WString::Unmanaged(L"/."));
-								break;
-							case L';':
-								writer.WriteString(WString::Unmanaged(L"|"));
-								break;
-							}
-						}
-						else
-						{
-							writer.WriteString(u32tow(regex_internal::EscapeTextForRegex(wtou32(match->Result().Value()))));
-						}
-					}
-					writer.WriteString(L")$");
-				});
-				filterItem->regexFilter = Ptr(new Regex(regexFilter));
-
-				vm->filters.Add(filterItem);
-
-				if (second == -1) break;
-				filterStart = second + 1;
-			}
-
-			if (vm->filters.Count() > 0)
-			{
-				if (selectionFilterIndex < 0 || vm->filters.Count() <= selectionFilterIndex)
-				{
-					selectionFilterIndex = 0;
-				}
-				vm->selectedFilter = vm->filters[selectionFilterIndex].Cast<FileDialogFilter>();
-			}
+			ParseFileDialogFilters(*vm.Obj(), selectionFilterIndex, filter);
 
 			vm->initialDirectory = initialDirectory;
 			vm->rootFolder = Ptr(new FileDialogFolder);
@@ -902,6 +941,42 @@ FakeDialogServiceBase
 				CopyFrom(selectionFileNames, vm->confirmedSelection);
 			}
 			return vm->confirmed;
+		}
+
+		Ptr<IFileDialogViewModel> CreateFileDialogViewModelForTest(
+			const FileSystemViewModelOptions& options,
+			const WString& initialDirectory,
+			const WString& filter,
+			INativeDialogService::FileDialogTypes dialogType,
+			vint selectionFilterIndex
+		)
+		{
+			auto vm = Ptr(new FileDialogViewModel);
+			vm->options = options;
+			if (!vm->options.messageBox)
+			{
+				vm->options.messageBox = Ptr(new DefaultFileSystemViewModelMessageBox);
+			}
+
+			ParseFileDialogFilters(*vm.Obj(), selectionFilterIndex, filter);
+
+			vm->initialDirectory = initialDirectory;
+			vm->rootFolder = Ptr(new FileDialogFolder);
+			vm->rootFolder->type = FileDialogFolderType::Root;
+
+			switch (dialogType)
+			{
+			case INativeDialogService::FileDialogOpen:
+			case INativeDialogService::FileDialogOpenPreview:
+				vm->selectToSave = false;
+				break;
+			case INativeDialogService::FileDialogSave:
+			case INativeDialogService::FileDialogSavePreview:
+				vm->selectToSave = true;
+				break;
+			}
+
+			return vm;
 		}
 	}
 }
